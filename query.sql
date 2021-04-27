@@ -132,8 +132,6 @@ events as (
 SELECT
   e.client_id,
   e.submission_date,
-#   add the new tab switch rate - Corey
-# Corey - other new tab interactions or customizations?
   COALESCE(COUNTIF(event_category = 'pictureinpicture' AND event_method =  'create'), 0) AS pip_count,
   COALESCE(COUNTIF(event_category = 'security.ui.protections' AND event_object = 'protection_report'), 0) AS viewed_protection_report_count,
   COUNTIF(event_category = 'security.ui.protectionspopup' AND event_object = 'etp_toggle_off') AS etp_toggle_off,
@@ -170,7 +168,33 @@ WHERE e.submission_date > start_date
   AND e.normalized_channel = 'release'
 GROUP BY 1, 2
 ),
-
+           
+activity_stream_events as (
+  SELECT
+    client_id,
+    DATE(submission_timestamp) as submission_date,
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' THEN true ELSE false END), false) as newtab_switch, 
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'TOP_SITES'), 0) as topsite_clicks,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'HIGHLIGHTS'), 0) as highlight_clicks
+  FROM `moz-fx-data-shared-prod`.activity_stream.events
+  WHERE DATE(submission_date) > start_date
+    AND sample_id = 0
+    AND normalized_channel = 'release'
+  ),
+           
+activity_stream_sessions as (
+  SELECT
+    client_id,
+    DATE(submission_timestamp) as submission_date,
+    COALESCE(MAX(user_prefs & 1 = 0), false) as turned_off_newtab_search,
+    COALESCE(MAX(user_prefs & 2 = 0), false) as turned_off_topsites,
+    COALESCE(MAX(user_prefs & 4 = 0), false) as turned_off_pocket,
+    COALESCE(MAX(user_prefs & 8 = 0), false) as turned_off_highlights
+  FROM  `moz-fx-data-shared-prod.activity_stream.sessions`
+  WHERE DATE(submission_date) > start_date
+    AND sample_id = 0
+    AND normalized_channel = 'release'
+  ),
 
 addons as (
   SELECT
@@ -204,11 +228,15 @@ SELECT
   u.*,
   m.* EXCEPT (client_id, submission_date),
   e.* EXCEPT (client_id, submission_date),
-  a.* EXCEPT (client_id, submission_date)
+  a.* EXCEPT (client_id, submission_date),
+  ae.* EXCEPT (client_id, submission_date),
+  asp.* EXCEPT (client_id, submission_date)
 FROM user_type u
 LEFT JOIN main m ON u.client_id = m.client_id AND u.submission_date = m.submission_date
 LEFT JOIN events e ON u.client_id = e.client_id AND u.submission_date = e.submission_date
 LEFT JOIN addons a ON u.client_id = a.client_id AND u.submission_date = a.submission_date
+LEFT JOIN activity_stream_events ase ON u.client_id = ase.client_id AND u.submission_date = ase.submission_date
+LEFT JOIN activity_stream_sessions asp ON u.client_id = asp.client_id AND u.submission_date = asp.submission_date
 )
 
 SELECT
