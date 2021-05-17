@@ -93,6 +93,7 @@ WHERE cls.submission_date > start_date
 main as (
 SELECT
   client_id,
+  # is this below line a aggregate function? It could cause problems with the groupby
   MOD(ABS(FARM_FINGERPRINT(client_id)), 100) AS subsample_id,
   DATE(submission_timestamp) AS submission_date,
   LOGICAL_OR(COALESCE(environment.system.gfx.headless, false)) as is_headless,
@@ -184,13 +185,20 @@ SELECT
   COALESCE(COUNTIF(event_category = 'pwmgr' AND event_method IN ('dismiss_breach_alert', 'learn_more_breach')), 0) AS pwmgr_interacted_breach,
   COALESCE(COUNTIF(event_object = 'generatedpassword' AND event_method = 'autocomplete_field'), 0) AS generated_password,
 #   Leif we should do some research on when these events are fired. EG bmks, which adding methods are we getting with this event.
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('CLICK') ), 0) AS newtab_click,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('BOOKMARK_ADD') ), 0) AS bookmark_added_from_newtab,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('SAVE_TO_POCKET') ), 0) AS saved_to_pocket_from_newtab,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('OPEN_NEWTAB_PREFS') ), 0) AS newtab_prefs_opened,
+                   
+# [@shong] for the event_category = 'activity_stream', I'm not sure what these events are or how/when they're fired. 
+# [@shong] there's a bunch of OTHER AS events (from their pingcentre API) so not sure how they overlap with these. 
+# [@shong] I suspect there's a bunch of caveats with these, so I think we need to do some due diligence to figure out what
+# [@shong] AS related telemetry we want to include / which ones are the "right" ones for the behaviors we want. 
+# [@shong] removed: newtab_click, bookmark_added_from_newtab, saved_to_pocket_from_newtab, newtab_prefs_opened
+
   COALESCE(COUNTIF(event_category = 'fxa' AND event_method = 'connect' ), 0) AS fxa_connect,
   COALESCE(COUNTIF(event_category = 'normandy' AND event_object IN ("preference_study", "addon_study", "preference_rollout", "addon_rollout") ), 0) AS normandy_enrolled,
-  COALESCE(COUNTIF(event_category = 'messaging_experiments' AND event_method = 'reach'), 0) AS cfr_qualified,
+
+# [@shong] so for cfr_qualified, this context is VERY experiment specific (if you're in control and you WOULD have seen some CFR, etc.) I don't think
+# [@shong] it's appropriate for this dataset. 
+# [@shong] removed cfr_qualified
+                   
   COALESCE(COUNTIF(event_category = 'downloads'), 0) AS downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value = 'pdf'), 0) AS pdf_downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('jpg', 'jpeg', 'png', 'gif')), 0) AS image_downloads,
@@ -207,27 +215,35 @@ activity_stream_events as (
   SELECT
     client_id,
     DATE(submission_timestamp) as submission_date,
-    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' THEN true ELSE false END), false) as newtab_switch, 
-    COALESCE(COUNTIF(event = 'CLICK' AND source = 'TOP_SITES'), 0) as topsite_clicks,
-    COALESCE(COUNTIF(event = 'CLICK' AND source = 'HIGHLIGHTS'), 0) as highlight_clicks
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'about:home' THEN true ELSE false END), false) as activitystream_reported_3rdparty_abouthome,
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'about:newtab' THEN true ELSE false END), false) as activitystream_reported_3rdparty_aboutnewtab,
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'both' THEN true ELSE false END), false) as activitystream_reported_3rdparty_both,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'TOP_SITES'), 0) as activitystream_topsite_clicks,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'HIGHLIGHTS'), 0) as activitystream_highlight_clicks,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'CARDGRID'), 0) as activitystream_pocket_clicks
   FROM `moz-fx-data-shared-prod`.activity_stream.events
-  WHERE DATE(submission_date) > start_date
+  WHERE DATE(submission_timestamp) > start_date
     AND sample_id = 0
     AND normalized_channel = 'release'
+  GROUP BY 1, 2
   ),
            
 activity_stream_sessions as (
   SELECT
     client_id,
     DATE(submission_timestamp) as submission_date,
-    COALESCE(MAX(user_prefs & 1 = 0), false) as turned_off_newtab_search,
-    COALESCE(MAX(user_prefs & 2 = 0), false) as turned_off_topsites,
-    COALESCE(MAX(user_prefs & 4 = 0), false) as turned_off_pocket,
-    COALESCE(MAX(user_prefs & 8 = 0), false) as turned_off_highlights
+    COALESCE(MAX(user_prefs & 1 = 0), false) as activitystream_reported_newtab_search_off,
+    COALESCE(MAX(user_prefs & 2 = 0), false) as activitystream_reported_topsites_off,
+    COALESCE(MAX(user_prefs & 4 = 0), false) as activitystream_reported_pocket_off,
+    COALESCE(MAX(user_prefs & 8 = 0), false) as activitystream_reported_highlights_off, 
+    COALESCE(COUNTIF(page = 'about:home'), 0) as activitystream_sessions_abouthome, 
+    COALESCE(COUNTIF(page = 'about:newtab'), 0) as activitystream_sessions_newtab,
+    COALESCE(COUNTIF(page in ('about:newtab', 'about:home')), 0) as activitystream_sessions_both
   FROM  `moz-fx-data-shared-prod.activity_stream.sessions`
-  WHERE DATE(submission_date) > start_date
+  WHERE DATE(submission_timestamp) > start_date
     AND sample_id = 0
     AND normalized_channel = 'release'
+  GROUP BY 1, 2
   ),
 
 addons as (
