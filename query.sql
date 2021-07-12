@@ -31,14 +31,6 @@ SELECT
   cls.os,
   cls.normalized_os_version,
   cls.app_version,
-  
-  # I split the attribution data into multiple fields. do we care about the string values of any of the attribution fields besides medium and campaign?
-  
-  # [@shong] I think the only attribution data we should include is attributed vs non-attributed
-  # [@shong] the actual values of attribution in Telemetry are transformed and not don't accurate represent the information
-  # [@shong] see: ISSUE: GA to Telemetry Attribution Passing Consistency: https://docs.google.com/document/d/112k76fWVWEV23bILg_RReiZEvFIXDlMH9w_yUwNYIGc/edit
-  # [@shong] removed: attribution_source, attribution_campaign, attribution_paid, and attribution_unpaid
-  
   (cls.attribution.campaign IS NOT NULL) OR (cls.attribution.source IS NOT NULL) AS attributed,
   cls.is_default_browser,
   cls.sync_count_desktop_mean,
@@ -63,23 +55,7 @@ SELECT
   search_count_tagged_follow_on,
   search_count_tagged_sap,
   search_count_urlbar,
-  search_with_ads_count_all,
-  
-  # [@shong] active_addons_count_mean, I believe this just counts all addons including stuff we have behind the 
-  # [@shong] curtain, system addons and such, and is not representative of the user added addons. 
-  # [@shong] I'm not sure we want to include this as it's really noisy, and might just distinguish between
-  # [@shong] different versions of Firefox (with different system addon states) then any user behavior or 
-  # [@shong] feature interaction we're interested in. I know there's an established methodology for determining
-  # [@shong] which addons are user added or not, maybe we should just provide that (user added addons)?
-  # [@shong] removed: active_addons_count_mean
-  
-  # [@shong] I don't think we should include the PLACES_BOOKMARKS_COUNT measurement since we know this
-  # [@shong] this telemetry is buggy (it's a state measurement that isn't always recorded when it should be, 
-  # [@shong] and it's unclear what conditions trigger it. Most likely a race condition of some kind, since 
-  # [@shong] PLACES module is really old and requires a lot of I/O). I don't think we should include it without
-  # [@shong] doing some due diligence and a decision point on if we believe this is reliable or not. 
-  # [@shong] see: https://colab.research.google.com/drive/1DzveSb7eqwIjxt1Ve_V0T8ROtPt6Dw8w#scrollTo=gRb0NXzKLLBX
-  # [@shong] removed: places_bookmarks_count_mean
+  search_with_ads_count_all
 
 
 FROM `moz-fx-data-shared-prod.telemetry.clients_last_seen` cls
@@ -112,39 +88,12 @@ SELECT
   COUNTIF(COALESCE(environment.services.account_enabled, FALSE)) > 0 AS sync_signed_in,
   COUNTIF(COALESCE(payload.processes.parent.scalars.formautofill_credit_cards_autofill_profiles_count IS NOT NULL, FALSE)) > 0 AS ccards_saved,
   COUNTIF(COALESCE(payload.processes.parent.scalars.dom_parentprocess_private_window_used, FALSE)) > 0 AS pbm_used,
-  
-  # [@shong] the imports query is actually wrong - the histograms include imports from profile refreshes (aka profile resets) 
-  # [@shong] which is where a lot of these import events are coming from. These are indicated by source: Firefox, but it needs 
-  # [@shong] to be filtered out. See: https://colab.research.google.com/drive/1yauD-2JcfvvFt_P87JfzSQ0tCEWHTZ4w
-  # [@shong] also, I think the histogram might have bins even if there are no items imported, so we should be checking
-  # [@shong] if the values are greater then 0, not array length. 
-  # [@shong] I'll add the correct query to this later (not sure if I can do it in this iteration, but put that action item on me) 
-  # [@shong] removed: imported_history, imported_bookmarks, imported_logins
-
-  # [@shong] so the pinned_tab_count_count had a bug with recording (it was only recording when a new pin / unpin action happened, 
-  # [@shong] not recording state), see: https://bugzilla.mozilla.org/show_bug.cgi?id=1639292 
-  # [@shong] so it looks like it got resolved, but it's not clear to me from the comments if the telemetry is doing exactly what we
-  # [@shong] think it does, or something similar. We should follow up to confirm exact behavior currently before adding. 
-  # [@shong] I've ping'd andrei for clarification. 
-  # [@shong] removed: pinned_tab_count_count
-
-  # [@shong] browser_ui_* telemetry, I'm not sure any due diligence has been done on these. I designed this telemetry but there's 
-  # [@shong] but there's been no followup validation of behavior AFAIK. Note - this was implemented as semi-unstructured telemetry design, so
-  # [@shong] we didn't really know exactly what the behavior will be when we implemented it. 
-  # [@shong] lets remove until we do some validation and documentation on this family of telemetry so we can confirm it behaves as we're assuming
-  # [@shong] it does. 
-  # [@shong] removed: unique_preferences_accessed_count, preferences_accessed_total, unique_bookmarks_bar_accessed_count, 
-  # [@shong]          bookmarks_bar_accessed_total, keyboard_shortcut_total, keyboard_shortcut_total
-
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.sidebar_opened), 0)) AS unique_sidebars_accessed_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.sidebar_opened)), 0)) AS sidebars_accessed_total,
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.urlbar_picked_history), 0)) AS unique_history_urlbar_indices_picked_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.urlbar_picked_history)), 0)) AS history_urlbar_picked_total,
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.urlbar_picked_remotetab), 0)) AS unique_remotetab_indices_picked_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.urlbar_picked_remotetab)), 0)) AS remotetab_picked_total,
-
-  # [@shong] see note on browser_ui_* above 
-
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_about_newtab)), 0)) AS uris_from_newtab,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_searchbar)), 0)) AS uris_from_searchbar,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_urlbar)), 0)) AS uris_from_urlbar,
@@ -153,7 +102,13 @@ SELECT
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 8), 0)) AS nav_visiturl_urlbar,
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 5), 0)) AS nav_searchsuggestion_urlbar,
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 13), 0)) AS nav_topsite_urlbar,
-  MAX(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.histograms.pwmgr_num_saved_passwords, '$.sum') AS int64), 0)) AS num_passwords_saved
+  MAX(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.histograms.pwmgr_num_saved_passwords, '$.sum') AS int64), 0)) AS num_passwords_saved,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general), 0)) AS unique_preferences_accessed_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general)), 0)) AS preferences_accessed_total,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar), 0)) AS unique_bookmarks_bar_accessed_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar)), 0)) AS bookmarks_bar_accessed_total,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard), 0)) AS unique_keyboard_shortcut_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard)), 0)) AS keyboard_shortcut_total,
 FROM `moz-fx-data-shared-prod.telemetry.main_1pct`
 WHERE
     DATE(submission_timestamp) > start_date
@@ -184,26 +139,17 @@ SELECT
   COALESCE(COUNTIF(event_category = 'pwmgr' AND event_method IN ('copy', 'show')), 0) AS pwmgr_copy_or_show_info,
   COALESCE(COUNTIF(event_category = 'pwmgr' AND event_method IN ('dismiss_breach_alert', 'learn_more_breach')), 0) AS pwmgr_interacted_breach,
   COALESCE(COUNTIF(event_object = 'generatedpassword' AND event_method = 'autocomplete_field'), 0) AS generated_password,
-#   Leif we should do some research on when these events are fired. EG bmks, which adding methods are we getting with this event.
-                   
-# [@shong] for the event_category = 'activity_stream', I'm not sure what these events are or how/when they're fired. 
-# [@shong] there's a bunch of OTHER AS events (from their pingcentre API) so not sure how they overlap with these. 
-# [@shong] I suspect there's a bunch of caveats with these, so I think we need to do some due diligence to figure out what
-# [@shong] AS related telemetry we want to include / which ones are the "right" ones for the behaviors we want. 
-# [@shong] removed: newtab_click, bookmark_added_from_newtab, saved_to_pocket_from_newtab, newtab_prefs_opened
-
   COALESCE(COUNTIF(event_category = 'fxa' AND event_method = 'connect' ), 0) AS fxa_connect,
   COALESCE(COUNTIF(event_category = 'normandy' AND event_object IN ("preference_study", "addon_study", "preference_rollout", "addon_rollout") ), 0) AS normandy_enrolled,
-
-# [@shong] so for cfr_qualified, this context is VERY experiment specific (if you're in control and you WOULD have seen some CFR, etc.) I don't think
-# [@shong] it's appropriate for this dataset. 
-# [@shong] removed cfr_qualified
-                   
   COALESCE(COUNTIF(event_category = 'downloads'), 0) AS downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value = 'pdf'), 0) AS pdf_downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('jpg', 'jpeg', 'png', 'gif')), 0) AS image_downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('mp4', 'mp3', 'wav', 'mov')), 0) AS media_downloads,
-  COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('xlsx', 'docx', 'pptx', 'xls', 'ppt', 'doc')), 0) AS msoffice_downloads
+  COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('xlsx', 'docx', 'pptx', 'xls', 'ppt', 'doc')), 0) AS msoffice_downloads,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('CLICK') ), 0) AS newtab_click,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('BOOKMARK_ADD') ), 0) AS bookmark_added_from_newtab,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('SAVE_TO_POCKET') ), 0) AS saved_to_pocket_from_newtab,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('OPEN_NEWTAB_PREFS') ), 0) AS newtab_prefs_opened
 FROM `moz-fx-data-shared-prod.telemetry.events` e
 WHERE e.submission_date > start_date
   AND e.sample_id = 0
