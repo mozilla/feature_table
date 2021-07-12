@@ -225,7 +225,7 @@ SELECT
   m.* EXCEPT (client_id, submission_date),
   e.* EXCEPT (client_id, submission_date),
   a.* EXCEPT (client_id, submission_date),
-  ae.* EXCEPT (client_id, submission_date),
+  ase.* EXCEPT (client_id, submission_date),
   asp.* EXCEPT (client_id, submission_date)
 FROM user_type u
 LEFT JOIN main m ON u.client_id = m.client_id AND u.submission_date = m.submission_date
