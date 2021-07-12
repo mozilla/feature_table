@@ -31,12 +31,7 @@ SELECT
   cls.os,
   cls.normalized_os_version,
   cls.app_version,
-  # I split the attribution data into multiple fields. do we care about the string values of any of the attribution fields besides medium and campaign?
-  cls.attribution.source AS attribution_source,
-  cls.attribution.campaign AS attribution_campaign,
   (cls.attribution.campaign IS NOT NULL) OR (cls.attribution.source IS NOT NULL) AS attributed,
-  cls.attribution.source IS NOT NULL AND cls.attribution.medium IN ('banner', 'cpc', 'display', 'paidsearch', 'ppc', 'affiliate', 'cpm') AS attributed_paid,
-  cls.attribution.source IS NOT NULL AND cls.attribution.medium NOT IN ('banner', 'cpc', 'display', 'paidsearch', 'ppc', 'affiliate', 'cpm') AS attributed_unpaid,
   cls.is_default_browser,
   cls.sync_count_desktop_mean,
   cls.sync_count_mobile_mean,
@@ -60,9 +55,7 @@ SELECT
   search_count_tagged_follow_on,
   search_count_tagged_sap,
   search_count_urlbar,
-  search_with_ads_count_all,
-  active_addons_count_mean,
-  places_bookmarks_count_mean
+  search_with_ads_count_all
 
 
 FROM `moz-fx-data-shared-prod.telemetry.clients_last_seen` cls
@@ -76,6 +69,7 @@ WHERE cls.submission_date > start_date
 main as (
 SELECT
   client_id,
+  # is this below line a aggregate function? It could cause problems with the groupby
   MOD(ABS(FARM_FINGERPRINT(client_id)), 100) AS subsample_id,
   DATE(submission_timestamp) AS submission_date,
   LOGICAL_OR(COALESCE(environment.system.gfx.headless, false)) as is_headless,
@@ -83,7 +77,7 @@ SELECT
   SUM(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.processes.content.histograms.video_encrypted_play_time_ms, '$.sum') AS int64), 0)) AS video_encrypted_play_time_ms,
   SUM(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.processes.content.histograms.pdf_viewer_time_to_view_ms, '$.sum') AS int64), 0)) AS pdf_viewer_time_to_view_ms_content,
   SUM(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.histograms.fx_picture_in_picture_window_open_duration, '$.sum') AS int64), 0)) AS pip_window_open_duration,
-   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(mozfun.hist.extract(payload.processes.content.histograms.video_play_time_ms).values)), 0)) AS video_play_time_ms_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(mozfun.hist.extract(payload.processes.content.histograms.video_play_time_ms).values)), 0)) AS video_play_time_ms_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(mozfun.hist.extract(payload.processes.content.histograms.video_encrypted_play_time_ms).values)), 0)) AS video_encrypted_play_time_ms_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(mozfun.hist.extract(payload.processes.content.histograms.pdf_viewer_time_to_view_ms).values)), 0)) AS pdf_viewer_time_to_view_ms_content_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(mozfun.hist.extract(payload.histograms.fx_picture_in_picture_window_open_duration).values)), 0)) AS pip_window_open_duration_count,
@@ -94,22 +88,12 @@ SELECT
   COUNTIF(COALESCE(environment.services.account_enabled, FALSE)) > 0 AS sync_signed_in,
   COUNTIF(COALESCE(payload.processes.parent.scalars.formautofill_credit_cards_autofill_profiles_count IS NOT NULL, FALSE)) > 0 AS ccards_saved,
   COUNTIF(COALESCE(payload.processes.parent.scalars.dom_parentprocess_private_window_used, FALSE)) > 0 AS pbm_used,
-  COUNTIF(COALESCE(ARRAY_LENGTH(payload.keyed_histograms.FX_MIGRATION_HISTORY_QUANTITY), 0) > 0) > 0 AS imported_history,
-  COUNTIF(COALESCE(ARRAY_LENGTH(payload.keyed_histograms.FX_MIGRATION_BOOKMARKS_QUANTITY), 0) > 0) > 0 AS imported_bookmarks,
-  COUNTIF(COALESCE(ARRAY_LENGTH(payload.keyed_histograms.fx_migration_logins_quantity), 0) > 0 ) > 0 AS imported_logins,
-  SUM(COALESCE(payload.processes.parent.scalars.browser_engagement_max_concurrent_tab_pinned_count, 0)) AS pinned_tab_count_count,
-  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general), 0)) AS unique_preferences_accessed_count,
-  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general)), 0)) AS preferences_accessed_total,
-  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar), 0)) AS unique_bookmarks_bar_accessed_count,
-  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar)), 0)) AS bookmarks_bar_accessed_total,
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.sidebar_opened), 0)) AS unique_sidebars_accessed_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.sidebar_opened)), 0)) AS sidebars_accessed_total,
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.urlbar_picked_history), 0)) AS unique_history_urlbar_indices_picked_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.urlbar_picked_history)), 0)) AS history_urlbar_picked_total,
   SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.urlbar_picked_remotetab), 0)) AS unique_remotetab_indices_picked_count,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.urlbar_picked_remotetab)), 0)) AS remotetab_picked_total,
-  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard), 0)) AS unique_keyboard_shortcut_count,
-  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard)), 0)) AS keyboard_shortcut_total,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_about_newtab)), 0)) AS uris_from_newtab,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_searchbar)), 0)) AS uris_from_searchbar,
   SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_engagement_navigation_urlbar)), 0)) AS uris_from_urlbar,
@@ -118,7 +102,13 @@ SELECT
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 8), 0)) AS nav_visiturl_urlbar,
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 5), 0)) AS nav_searchsuggestion_urlbar,
   SUM(COALESCE(`moz-fx-data-shared-prod.udf.get_key`(`moz-fx-data-shared-prod.udf.json_extract_histogram`(payload.histograms.fx_urlbar_selected_result_type_2).values, 13), 0)) AS nav_topsite_urlbar,
-  MAX(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.histograms.pwmgr_num_saved_passwords, '$.sum') AS int64), 0)) AS num_passwords_saved
+  MAX(COALESCE(CAST(JSON_EXTRACT_SCALAR(payload.histograms.pwmgr_num_saved_passwords, '$.sum') AS int64), 0)) AS num_passwords_saved,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general), 0)) AS unique_preferences_accessed_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_preferences_pane_general)), 0)) AS preferences_accessed_total,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar), 0)) AS unique_bookmarks_bar_accessed_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_bookmarks_bar)), 0)) AS bookmarks_bar_accessed_total,
+  SUM(COALESCE(ARRAY_LENGTH(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard), 0)) AS unique_keyboard_shortcut_count,
+  SUM(COALESCE((SELECT SUM(value) FROM UNNEST(payload.processes.parent.keyed_scalars.browser_ui_interaction_keyboard)), 0)) AS keyboard_shortcut_total,
 FROM `moz-fx-data-shared-prod.telemetry.main_1pct`
 WHERE
     DATE(submission_timestamp) > start_date
@@ -149,19 +139,17 @@ SELECT
   COALESCE(COUNTIF(event_category = 'pwmgr' AND event_method IN ('copy', 'show')), 0) AS pwmgr_copy_or_show_info,
   COALESCE(COUNTIF(event_category = 'pwmgr' AND event_method IN ('dismiss_breach_alert', 'learn_more_breach')), 0) AS pwmgr_interacted_breach,
   COALESCE(COUNTIF(event_object = 'generatedpassword' AND event_method = 'autocomplete_field'), 0) AS generated_password,
-#   Leif we should do some research on when these events are fired. EG bmks, which adding methods are we getting with this event.
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('CLICK') ), 0) AS newtab_click,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('BOOKMARK_ADD') ), 0) AS bookmark_added_from_newtab,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('SAVE_TO_POCKET') ), 0) AS saved_to_pocket_from_newtab,
-  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('OPEN_NEWTAB_PREFS') ), 0) AS newtab_prefs_opened,
   COALESCE(COUNTIF(event_category = 'fxa' AND event_method = 'connect' ), 0) AS fxa_connect,
   COALESCE(COUNTIF(event_category = 'normandy' AND event_object IN ("preference_study", "addon_study", "preference_rollout", "addon_rollout") ), 0) AS normandy_enrolled,
-  COALESCE(COUNTIF(event_category = 'messaging_experiments' AND event_method = 'reach'), 0) AS cfr_qualified,
   COALESCE(COUNTIF(event_category = 'downloads'), 0) AS downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value = 'pdf'), 0) AS pdf_downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('jpg', 'jpeg', 'png', 'gif')), 0) AS image_downloads,
   COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('mp4', 'mp3', 'wav', 'mov')), 0) AS media_downloads,
-  COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('xlsx', 'docx', 'pptx', 'xls', 'ppt', 'doc')), 0) AS msoffice_downloads
+  COALESCE(COUNTIF(event_category = 'downloads' AND event_string_value IN ('xlsx', 'docx', 'pptx', 'xls', 'ppt', 'doc')), 0) AS msoffice_downloads,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('CLICK') ), 0) AS newtab_click,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('BOOKMARK_ADD') ), 0) AS bookmark_added_from_newtab,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('SAVE_TO_POCKET') ), 0) AS saved_to_pocket_from_newtab,
+  COALESCE(COUNTIF(event_category = 'activity_stream' AND event_object IN ('OPEN_NEWTAB_PREFS') ), 0) AS newtab_prefs_opened
 FROM `moz-fx-data-shared-prod.telemetry.events` e
 WHERE e.submission_date > start_date
   AND e.sample_id = 0
@@ -173,27 +161,35 @@ activity_stream_events as (
   SELECT
     client_id,
     DATE(submission_timestamp) as submission_date,
-    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' THEN true ELSE false END), false) as newtab_switch, 
-    COALESCE(COUNTIF(event = 'CLICK' AND source = 'TOP_SITES'), 0) as topsite_clicks,
-    COALESCE(COUNTIF(event = 'CLICK' AND source = 'HIGHLIGHTS'), 0) as highlight_clicks
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'about:home' THEN true ELSE false END), false) as activitystream_reported_3rdparty_abouthome,
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'about:newtab' THEN true ELSE false END), false) as activitystream_reported_3rdparty_aboutnewtab,
+    COALESCE(LOGICAL_OR(CASE WHEN event = 'PAGE_TAKEOVER_DATA' AND page = 'both' THEN true ELSE false END), false) as activitystream_reported_3rdparty_both,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'TOP_SITES'), 0) as activitystream_topsite_clicks,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'HIGHLIGHTS'), 0) as activitystream_highlight_clicks,
+    COALESCE(COUNTIF(event = 'CLICK' AND source = 'CARDGRID'), 0) as activitystream_pocket_clicks
   FROM `moz-fx-data-shared-prod`.activity_stream.events
-  WHERE DATE(submission_date) > start_date
+  WHERE DATE(submission_timestamp) > start_date
     AND sample_id = 0
     AND normalized_channel = 'release'
+  GROUP BY 1, 2
   ),
            
 activity_stream_sessions as (
   SELECT
     client_id,
     DATE(submission_timestamp) as submission_date,
-    COALESCE(MAX(user_prefs & 1 = 0), false) as turned_off_newtab_search,
-    COALESCE(MAX(user_prefs & 2 = 0), false) as turned_off_topsites,
-    COALESCE(MAX(user_prefs & 4 = 0), false) as turned_off_pocket,
-    COALESCE(MAX(user_prefs & 8 = 0), false) as turned_off_highlights
+    COALESCE(MAX(user_prefs & 1 = 0), false) as activitystream_reported_newtab_search_off,
+    COALESCE(MAX(user_prefs & 2 = 0), false) as activitystream_reported_topsites_off,
+    COALESCE(MAX(user_prefs & 4 = 0), false) as activitystream_reported_pocket_off,
+    COALESCE(MAX(user_prefs & 8 = 0), false) as activitystream_reported_highlights_off, 
+    COALESCE(COUNTIF(page = 'about:home'), 0) as activitystream_sessions_abouthome, 
+    COALESCE(COUNTIF(page = 'about:newtab'), 0) as activitystream_sessions_newtab,
+    COALESCE(COUNTIF(page in ('about:newtab', 'about:home')), 0) as activitystream_sessions_both
   FROM  `moz-fx-data-shared-prod.activity_stream.sessions`
-  WHERE DATE(submission_date) > start_date
+  WHERE DATE(submission_timestamp) > start_date
     AND sample_id = 0
     AND normalized_channel = 'release'
+  GROUP BY 1, 2
   ),
 
 addons as (
