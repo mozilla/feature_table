@@ -182,6 +182,7 @@ activity_stream_sessions as (
     COALESCE(MAX(user_prefs & 2 = 0), false) as activitystream_reported_topsites_off,
     COALESCE(MAX(user_prefs & 4 = 0), false) as activitystream_reported_pocket_off,
     COALESCE(MAX(user_prefs & 8 = 0), false) as activitystream_reported_highlights_off, 
+    COALESCE(MAX(user_prefs & 256 = 0), false) as activitystream_reported_sponsored_topsites_off,   
     COALESCE(COUNTIF(page = 'about:home'), 0) as activitystream_sessions_abouthome, 
     COALESCE(COUNTIF(page = 'about:newtab'), 0) as activitystream_sessions_newtab,
     COALESCE(COUNTIF(page in ('about:newtab', 'about:home')), 0) as activitystream_sessions_both
